@@ -17,7 +17,7 @@ import (
 	"time"
 )
 
-var Version = "1.1.4"
+var Version = "1.1.5"
 const RepoName = "TarsOpenWebUI"
 
 var startTime = time.Now()
@@ -150,6 +150,7 @@ func main() {
 	writeTimeout := parseDurationEnv("TARS_WRITE_TIMEOUT", "30s")
 	log.Printf("[%s] 启动中 版本=%s 上游=%s read_timeout=%s write_timeout=%s",
 		RepoName, Version, cfg["endpoint"], readTimeout, writeTimeout)
+	limiter := newRateLimiter(60, time.Minute)
 	mode := os.Getenv("TARS_MCP_MODE")
 	if mode == "" { mode = "stdio" }
 	srv := &http.Server{
@@ -157,12 +158,12 @@ func main() {
 		ReadTimeout:  readTimeout,
 		WriteTimeout: writeTimeout,
 	}
-	http.HandleFunc("/health", loggingMiddleware(func(w http.ResponseWriter, r *http.Request) { withClient(client, healthHandler)(w, r) }))
-	http.HandleFunc("/ready", loggingMiddleware(func(w http.ResponseWriter, r *http.Request) { withClient(client, readyHandler)(w, r) }))
-	http.HandleFunc("/tools", loggingMiddleware(func(w http.ResponseWriter, r *http.Request) { withClient(client, toolsHandler)(w, r) }))
-	http.HandleFunc("/invoke", loggingMiddleware(func(w http.ResponseWriter, r *http.Request) { withClient(client, invokeHandler)(w, r) }))
-	http.HandleFunc("/metrics", loggingMiddleware(metricsHandler))
-	http.HandleFunc("/version", loggingMiddleware(versionHandler))
+	http.HandleFunc("/health", rateLimitMiddleware(limiter, loggingMiddleware(func(w http.ResponseWriter, r *http.Request) { withClient(client, healthHandler)(w, r) })))
+	http.HandleFunc("/ready", rateLimitMiddleware(limiter, loggingMiddleware(func(w http.ResponseWriter, r *http.Request) { withClient(client, readyHandler)(w, r) })))
+	http.HandleFunc("/tools", rateLimitMiddleware(limiter, loggingMiddleware(func(w http.ResponseWriter, r *http.Request) { withClient(client, toolsHandler)(w, r) })))
+	http.HandleFunc("/invoke", rateLimitMiddleware(limiter, loggingMiddleware(func(w http.ResponseWriter, r *http.Request) { withClient(client, invokeHandler)(w, r) })))
+	http.HandleFunc("/metrics", rateLimitMiddleware(limiter, loggingMiddleware(metricsHandler)))
+	http.HandleFunc("/version", rateLimitMiddleware(limiter, loggingMiddleware(versionHandler)))
 	go func() {
 		sigCh := make(chan os.Signal, 1)
 		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
@@ -406,5 +407,17 @@ func handleStdioTool(ctx context.Context, client *Client, toolName string, args 
 		return map[string]interface{}{"content": []map[string]string{{"type": "text", "text": string(data)}}}
 	default:
 		return map[string]interface{}{"content": []map[string]string{{"type": "text", "text": fmt.Sprintf("暂不支持该工具：%s（可用工具：openwebui_list_models、openwebui_chat）", toolName)}}}
+	}
+}
+
+func rateLimitMiddleware(limiter *rateLimiter, next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ip := getClientIP(r)
+		if !limiter.allow(ip) {
+			w.WriteHeader(http.StatusTooManyRequests)
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"error": "请求太频繁，请稍后再试（每分钟最多 60 次）"})
+			return
+		}
+		next(w, r)
 	}
 }
