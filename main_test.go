@@ -7,12 +7,13 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
 
 func TestVersion(t *testing.T) {
-	if Version != "1.1.0" {
+	if Version != "1.1.1" {
 		t.Fatalf("expected version 1.1.0, got %s", Version)
 	}
 }
@@ -204,5 +205,39 @@ func TestHealthHandler_UptimeFormat(t *testing.T) {
 	uptime, ok := resp["uptime"].(string)
 	if !ok || uptime == "" {
 		t.Fatalf("expected uptime string, got %v", resp["uptime"])
+	}
+}
+
+func TestMetricsHandler(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	w := httptest.NewRecorder()
+	loggingMiddleware(metricsHandler)(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var resp map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := resp["requests_total"]; !ok {
+		t.Fatal("expected requests_total")
+	}
+	if _, ok := resp["errors_total"]; !ok {
+		t.Fatal("expected errors_total")
+	}
+	if _, ok := resp["uptime"]; !ok {
+		t.Fatal("expected uptime")
+	}
+}
+
+func TestMetricsHandler_CountsRequests(t *testing.T) {
+	before := atomic.LoadInt64(&requestCount)
+	client := NewClient("", "")
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	w := httptest.NewRecorder()
+	loggingMiddleware(withClient(client, healthHandler))(w, req)
+	after := atomic.LoadInt64(&requestCount)
+	if after <= before {
+		t.Fatalf("expected requestCount to increase, before=%d after=%d", before, after)
 	}
 }

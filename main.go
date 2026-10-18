@@ -12,14 +12,17 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 )
 
-var Version = "1.1.0"
+var Version = "1.1.1"
 const RepoName = "TarsOpenWebUI"
 
 var startTime = time.Now()
+var requestCount int64
+var errorCount int64
 
 type Client struct {
 	Endpoint string
@@ -120,12 +123,18 @@ func main() {
 	http.HandleFunc("/health", loggingMiddleware(func(w http.ResponseWriter, r *http.Request) { withClient(client, healthHandler)(w, r) }))
 	http.HandleFunc("/tools", loggingMiddleware(func(w http.ResponseWriter, r *http.Request) { withClient(client, toolsHandler)(w, r) }))
 	http.HandleFunc("/invoke", loggingMiddleware(func(w http.ResponseWriter, r *http.Request) { withClient(client, invokeHandler)(w, r) }))
+	http.HandleFunc("/metrics", loggingMiddleware(metricsHandler))
 	go func() {
 		sigCh := make(chan os.Signal, 1)
 		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 		<-sigCh
 		log.Printf("[%s] 正在关闭...", RepoName)
-		_ = srv.Close()
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := srv.Shutdown(ctx); err != nil {
+			log.Printf("[%s] 关闭超时: %v", RepoName, err)
+			_ = srv.Close()
+		}
 	}()
 	if mode == "stdio" {
 		runStdioServer(client)
@@ -139,9 +148,13 @@ func main() {
 
 func loggingMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt64(&requestCount, 1)
 		start := time.Now()
 		rw := &responseRecorder{ResponseWriter: w, statusCode: http.StatusOK}
 		next(rw, r)
+		if rw.statusCode >= 400 {
+			atomic.AddInt64(&errorCount, 1)
+		}
 		log.Printf("[%s] %s %s -> %d (%s)", RepoName, r.Method, r.URL.Path, rw.statusCode, time.Since(start))
 	}
 }
@@ -181,6 +194,15 @@ func healthHandler(w http.ResponseWriter, r *http.Request, client *Client) {
 		"upstream": up,
 		"uptime":   time.Since(startTime).Round(time.Second).String(),
 		"time":     time.Now().UTC().Format(time.RFC3339),
+	})
+}
+
+func metricsHandler(w http.ResponseWriter, r *http.Request) {
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"requests_total": atomic.LoadInt64(&requestCount),
+		"errors_total":   atomic.LoadInt64(&errorCount),
+		"uptime":         time.Since(startTime).Round(time.Second).String(),
+		"version":        Version,
 	})
 }
 
