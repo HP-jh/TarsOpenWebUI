@@ -1,0 +1,12 @@
+*.exe
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+/vendor/
+/dist/
+/build/
+.env
+.env.local
+.DS_Store
