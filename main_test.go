@@ -13,7 +13,7 @@ import (
 )
 
 func TestVersion(t *testing.T) {
-	if Version != "1.1.3" {
+	if Version != "1.1.4" {
 		t.Fatalf("expected version 1.1.0, got %s", Version)
 	}
 }
@@ -253,7 +253,7 @@ func TestVersionHandler(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatal(err)
 	}
-	if resp["version"] != "1.1.3" {
+	if resp["version"] != "1.1.4" {
 		t.Fatalf("expected version 1.1.2, got %v", resp["version"])
 	}
 	if resp["name"] != RepoName {
@@ -296,5 +296,49 @@ func TestRequestIDInResponse(t *testing.T) {
 	respID := w.Header().Get("X-Request-ID")
 	if respID == "" {
 		t.Fatal("expected X-Request-ID in response")
+	}
+}
+
+func TestReadyHandler_Up(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]interface{}{"status": "ok"})
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	client := NewClient(srv.URL, "")
+	req := httptest.NewRequest(http.MethodGet, "/ready", nil)
+	w := httptest.NewRecorder()
+	loggingMiddleware(withClient(client, readyHandler))(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var resp map[string]interface{}
+	json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp["ready"] != true {
+		t.Fatalf("expected ready=true, got %v", resp["ready"])
+	}
+}
+
+func TestReadyHandler_Down(t *testing.T) {
+	client := NewClient("", "")
+	req := httptest.NewRequest(http.MethodGet, "/ready", nil)
+	w := httptest.NewRecorder()
+	loggingMiddleware(withClient(client, readyHandler))(w, req)
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d", w.Code)
+	}
+}
+
+func TestInvokeHandler_BodyTooLarge(t *testing.T) {
+	client := NewClient("", "")
+	bigBody := make([]byte, maxBodySize+100)
+	for i := range bigBody { bigBody[i] = 'a' }
+	body := []byte(`{"tool":"openwebui_chat","params":{"model":"x","messages":[` + string(bigBody) + `]}}`)
+	req := httptest.NewRequest(http.MethodPost, "/invoke", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	loggingMiddleware(withClient(client, invokeHandler))(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for oversized body, got %d", w.Code)
 	}
 }

@@ -17,12 +17,14 @@ import (
 	"time"
 )
 
-var Version = "1.1.3"
+var Version = "1.1.4"
 const RepoName = "TarsOpenWebUI"
 
 var startTime = time.Now()
 var requestCount int64
 var errorCount int64
+
+const maxBodySize = 1 << 20 // 1 MB
 
 type Client struct {
 	Endpoint string
@@ -50,6 +52,7 @@ func printBanner() {
 	fmt.Println("  ───────────────────────────────")
 	fmt.Println("  MCP integration for OpenWebUI")
 	fmt.Println("  ───────────────────────────────")
+	fmt.Println()
 }
 
 func parseDurationEnv(key, defaultVal string) time.Duration {
@@ -155,6 +158,7 @@ func main() {
 		WriteTimeout: writeTimeout,
 	}
 	http.HandleFunc("/health", loggingMiddleware(func(w http.ResponseWriter, r *http.Request) { withClient(client, healthHandler)(w, r) }))
+	http.HandleFunc("/ready", loggingMiddleware(func(w http.ResponseWriter, r *http.Request) { withClient(client, readyHandler)(w, r) }))
 	http.HandleFunc("/tools", loggingMiddleware(func(w http.ResponseWriter, r *http.Request) { withClient(client, toolsHandler)(w, r) }))
 	http.HandleFunc("/invoke", loggingMiddleware(func(w http.ResponseWriter, r *http.Request) { withClient(client, invokeHandler)(w, r) }))
 	http.HandleFunc("/metrics", loggingMiddleware(metricsHandler))
@@ -235,6 +239,18 @@ func healthHandler(w http.ResponseWriter, r *http.Request, client *Client) {
 	})
 }
 
+func readyHandler(w http.ResponseWriter, r *http.Request, client *Client) {
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+	_, err := client.reqWithRetry(ctx, "GET", "/health", nil)
+	if err != nil {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"ready": false, "reason": "上游服务未就绪"})
+		return
+	}
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{"ready": true})
+}
+
 func metricsHandler(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"requests_total": atomic.LoadInt64(&requestCount),
@@ -286,13 +302,18 @@ func invokeHandler(w http.ResponseWriter, r *http.Request, client *Client) {
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{"error": "只接受 POST 请求，请使用 POST 方法调用工具"})
 		return
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxBodySize)
 	var req struct {
 		Tool   string                 `json:"tool"`
 		Params map[string]interface{} `json:"params"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{"error": fmt.Sprintf("请求格式不对，请检查 JSON：%v", err)})
+		if err.Error() == "http: request body too large" {
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"error": "请求体超过 1MB 限制，请减小请求大小"})
+		} else {
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"error": fmt.Sprintf("请求格式不对，请检查 JSON：%v", err)})
+		}
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
