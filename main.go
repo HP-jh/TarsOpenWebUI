@@ -9,6 +9,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"os/signal"
 	"strings"
@@ -17,7 +18,7 @@ import (
 	"time"
 )
 
-var Version = "1.1.5"
+var Version = "1.1.6"
 const RepoName = "TarsOpenWebUI"
 
 var startTime = time.Now()
@@ -53,6 +54,21 @@ func printBanner() {
 	fmt.Println("  MCP integration for OpenWebUI")
 	fmt.Println("  ───────────────────────────────")
 	fmt.Println()
+}
+
+func printEnv() {
+	has := false
+	for _, e := range os.Environ() {
+		if strings.HasPrefix(e, "TARS_") {
+			if !has { log.Printf("[%s] 环境变量:", RepoName); has = true }
+			parts := strings.SplitN(e, "=", 2)
+			val := parts[1]
+			if strings.Contains(strings.ToLower(parts[0]), "key") || strings.Contains(strings.ToLower(parts[0]), "secret") || strings.Contains(strings.ToLower(parts[0]), "token") {
+				val = strings.Repeat("*", len(val))
+			}
+			log.Printf("  %s=%s", parts[0], val)
+		}
+	}
 }
 
 func parseDurationEnv(key, defaultVal string) time.Duration {
@@ -141,6 +157,7 @@ func main() {
 		return
 	}
 	printBanner()
+	printEnv()
 	cfg := loadConfig()
 	if err := validateConfig(cfg); err != nil {
 		log.Fatalf("[配置错误] %v", err)
@@ -150,9 +167,9 @@ func main() {
 	writeTimeout := parseDurationEnv("TARS_WRITE_TIMEOUT", "30s")
 	log.Printf("[%s] 启动中 版本=%s 上游=%s read_timeout=%s write_timeout=%s",
 		RepoName, Version, cfg["endpoint"], readTimeout, writeTimeout)
-	limiter := newRateLimiter(60, time.Minute)
 	mode := os.Getenv("TARS_MCP_MODE")
 	if mode == "" { mode = "stdio" }
+	limiter := newRateLimiter(60, time.Minute)
 	srv := &http.Server{
 		Addr:         ":8080",
 		ReadTimeout:  readTimeout,
@@ -164,6 +181,10 @@ func main() {
 	http.HandleFunc("/invoke", rateLimitMiddleware(limiter, loggingMiddleware(func(w http.ResponseWriter, r *http.Request) { withClient(client, invokeHandler)(w, r) })))
 	http.HandleFunc("/metrics", rateLimitMiddleware(limiter, loggingMiddleware(metricsHandler)))
 	http.HandleFunc("/version", rateLimitMiddleware(limiter, loggingMiddleware(versionHandler)))
+	if os.Getenv("TARS_DEBUG") == "1" {
+		log.Printf("[%s] 调试模式已开启，pprof 端点可用", RepoName)
+		http.HandleFunc("/debug/pprof/", loggingMiddleware(func(w http.ResponseWriter, r *http.Request) { http.DefaultServeMux.ServeHTTP(w, r) }))
+	}
 	go func() {
 		sigCh := make(chan os.Signal, 1)
 		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
@@ -183,6 +204,18 @@ func main() {
 	log.Printf("[%s] HTTP 服务已启动 %s", RepoName, srv.Addr)
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("服务异常：%v", err)
+	}
+}
+
+func rateLimitMiddleware(limiter *rateLimiter, next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ip := getClientIP(r)
+		if !limiter.allow(ip) {
+			w.WriteHeader(http.StatusTooManyRequests)
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"error": "请求太频繁，请稍后再试（每分钟最多 60 次）"})
+			return
+		}
+		next(w, r)
 	}
 }
 
@@ -407,17 +440,5 @@ func handleStdioTool(ctx context.Context, client *Client, toolName string, args 
 		return map[string]interface{}{"content": []map[string]string{{"type": "text", "text": string(data)}}}
 	default:
 		return map[string]interface{}{"content": []map[string]string{{"type": "text", "text": fmt.Sprintf("暂不支持该工具：%s（可用工具：openwebui_list_models、openwebui_chat）", toolName)}}}
-	}
-}
-
-func rateLimitMiddleware(limiter *rateLimiter, next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		ip := getClientIP(r)
-		if !limiter.allow(ip) {
-			w.WriteHeader(http.StatusTooManyRequests)
-			_ = json.NewEncoder(w).Encode(map[string]interface{}{"error": "请求太频繁，请稍后再试（每分钟最多 60 次）"})
-			return
-		}
-		next(w, r)
 	}
 }

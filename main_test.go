@@ -13,7 +13,7 @@ import (
 )
 
 func TestVersion(t *testing.T) {
-	if Version != "1.1.5" {
+	if Version != "1.1.6" {
 		t.Fatalf("expected version 1.1.0, got %s", Version)
 	}
 }
@@ -253,7 +253,7 @@ func TestVersionHandler(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatal(err)
 	}
-	if resp["version"] != "1.1.5" {
+	if resp["version"] != "1.1.6" {
 		t.Fatalf("expected version 1.1.5, got %v", resp["version"])
 	}
 	if resp["name"] != RepoName {
