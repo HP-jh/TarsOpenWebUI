@@ -17,7 +17,7 @@ import (
 	"time"
 )
 
-var Version = "1.1.2"
+var Version = "1.1.3"
 const RepoName = "TarsOpenWebUI"
 
 var startTime = time.Now()
@@ -41,6 +41,17 @@ func NewClient(endpoint, apiKey string) *Client {
 	}
 }
 
+func generateRequestID() string {
+	return fmt.Sprintf("%d-%d", time.Now().UnixNano(), os.Getpid())
+}
+
+func printBanner() {
+	fmt.Printf("\n  %s v%s\n", RepoName, Version)
+	fmt.Println("  ───────────────────────────────")
+	fmt.Println("  MCP integration for OpenWebUI")
+	fmt.Println("  ───────────────────────────────")
+}
+
 func parseDurationEnv(key, defaultVal string) time.Duration {
 	s := os.Getenv(key)
 	if s == "" { s = defaultVal }
@@ -57,7 +68,6 @@ func mustParseDuration(s string) time.Duration {
 	return d
 }
 
-// reqWithRetry performs HTTP request with exponential backoff (3 attempts).
 func (c *Client) reqWithRetry(ctx context.Context, method, path string, body interface{}) (map[string]interface{}, error) {
 	var lastErr error
 	for attempt := 0; attempt < 3; attempt++ {
@@ -127,6 +137,7 @@ func main() {
 		fmt.Printf("%s v%s\n", RepoName, Version)
 		return
 	}
+	printBanner()
 	cfg := loadConfig()
 	if err := validateConfig(cfg); err != nil {
 		log.Fatalf("[配置错误] %v", err)
@@ -172,6 +183,9 @@ func main() {
 
 func loggingMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		reqID := r.Header.Get("X-Request-ID")
+		if reqID == "" { reqID = generateRequestID() }
+		w.Header().Set("X-Request-ID", reqID)
 		atomic.AddInt64(&requestCount, 1)
 		start := time.Now()
 		rw := &responseRecorder{ResponseWriter: w, statusCode: http.StatusOK}
@@ -179,7 +193,7 @@ func loggingMiddleware(next http.HandlerFunc) http.HandlerFunc {
 		if rw.statusCode >= 400 {
 			atomic.AddInt64(&errorCount, 1)
 		}
-		log.Printf("[%s] %s %s -> %d (%s)", RepoName, r.Method, r.URL.Path, rw.statusCode, time.Since(start))
+		log.Printf("[%s] [%s] %s %s -> %d (%s)", RepoName, reqID, r.Method, r.URL.Path, rw.statusCode, time.Since(start))
 	}
 }
 
@@ -198,7 +212,7 @@ func withClient(client *Client, fn func(http.ResponseWriter, *http.Request, *Cli
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Request-ID")
 		if r.Method == http.MethodOptions { w.WriteHeader(http.StatusNoContent); return }
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("X-Frame-Options", "DENY")

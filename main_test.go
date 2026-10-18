@@ -13,7 +13,7 @@ import (
 )
 
 func TestVersion(t *testing.T) {
-	if Version != "1.1.2" {
+	if Version != "1.1.3" {
 		t.Fatalf("expected version 1.1.0, got %s", Version)
 	}
 }
@@ -253,7 +253,7 @@ func TestVersionHandler(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatal(err)
 	}
-	if resp["version"] != "1.1.2" {
+	if resp["version"] != "1.1.3" {
 		t.Fatalf("expected version 1.1.2, got %v", resp["version"])
 	}
 	if resp["name"] != RepoName {
@@ -274,5 +274,27 @@ func TestParseDurationEnv_Custom(t *testing.T) {
 	d := parseDurationEnv("TEST_DUR_ABC", "30s")
 	if d != 5*time.Minute {
 		t.Fatalf("expected 5m, got %v", d)
+	}
+}
+
+func TestGenerateRequestID(t *testing.T) {
+	id1 := generateRequestID()
+	id2 := generateRequestID()
+	if id1 == "" || id2 == "" {
+		t.Fatal("expected non-empty request IDs")
+	}
+	if id1 == id2 {
+		t.Fatal("expected unique request IDs")
+	}
+}
+
+func TestRequestIDInResponse(t *testing.T) {
+	client := NewClient("", "")
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	w := httptest.NewRecorder()
+	loggingMiddleware(withClient(client, healthHandler))(w, req)
+	respID := w.Header().Get("X-Request-ID")
+	if respID == "" {
+		t.Fatal("expected X-Request-ID in response")
 	}
 }

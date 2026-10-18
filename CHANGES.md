@@ -34,3 +34,13 @@
 
 ### 测试
 - 新增 3 个测试（version 端点、duration 解析默认/自定义值），19 个测试 `go test -race` 全绿
+
+## v1.1.3 · 请求追踪与启动体验
+
+### 新增功能
+- **请求 ID 追踪**：每个请求自动生成唯一 X-Request-ID，并返回给客户端，便于全链路排查
+- **启动 Banner**：服务启动时打印美观的 ASCII banner，一眼识别服务与版本
+- **CORS 支持 X-Request-ID**：预检响应头增加 X-Request-ID，允许浏览器跨域携带
+
+### 测试
+- 新增 2 个请求 ID 测试，21 个测试 `go test -race` 全绿
