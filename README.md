@@ -2,6 +2,8 @@
 
 MCP integration for OpenWebUI (self-hosted LLM chat).
 
+**当前版本：v1.1.0**
+
 ## 关于作者
 
 > 你好！我是这个项目的作者，一名正在读小学的学生。
@@ -25,8 +27,8 @@ MCP integration for OpenWebUI (self-hosted LLM chat).
 
 ## Tools
 
-- `openwebui_list_models` — List available local models
-- `openwebui_chat` — Send a chat completion request
+- `openwebui_list_models` — 列出 OpenWebUI 中可用的本地模型
+- `openwebui_chat` — 向指定模型发送对话请求并获取回复
 
 ## Quick Start
 
@@ -37,9 +39,9 @@ TARS_MCP_ENDPOINT=https://api.example.com TARS_MCP_API_KEY=xxx ./tarsopenwebui
 
 ## Environment Variables
 
-- `TARS_MCP_ENDPOINT` — upstream API endpoint
-- `TARS_MCP_API_KEY` — upstream API key
-- `TARS_MCP_MODE` — `stdio` (default) or `http`
+- `TARS_MCP_ENDPOINT` — 上游 API 地址（**必填**）
+- `TARS_MCP_API_KEY` — 上游 API 密钥
+- `TARS_MCP_MODE` — `stdio`（默认）或 `http`
 
 ## License
 
