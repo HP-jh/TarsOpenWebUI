@@ -25,3 +25,12 @@
 
 ### 测试
 - 新增 2 个 metrics 相关测试，17 个测试 `go test -race` 全绿
+
+## v1.1.2 · 可配置与版本端点
+
+### 新增功能
+- **/version 端点**：暴露服务名称、版本号和 Go 版本，便于客户端和服务网格识别
+- **超时环境变量配置**：支持 `TARS_READ_TIMEOUT` 和 `TARS_WRITE_TIMEOUT` 自定义（默认 30s），无需改代码即可适配不同网络环境
+
+### 测试
+- 新增 3 个测试（version 端点、duration 解析默认/自定义值），19 个测试 `go test -race` 全绿

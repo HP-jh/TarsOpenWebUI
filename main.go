@@ -17,7 +17,7 @@ import (
 	"time"
 )
 
-var Version = "1.1.1"
+var Version = "1.1.2"
 const RepoName = "TarsOpenWebUI"
 
 var startTime = time.Now()
@@ -39,6 +39,22 @@ func NewClient(endpoint, apiKey string) *Client {
 		APIKey:   apiKey,
 		Client:   &http.Client{Timeout: 30 * time.Second},
 	}
+}
+
+func parseDurationEnv(key, defaultVal string) time.Duration {
+	s := os.Getenv(key)
+	if s == "" { s = defaultVal }
+	d, err := time.ParseDuration(s)
+	if err != nil {
+		log.Printf("[警告] %s 格式不对（%s），使用默认值 %s", key, s, defaultVal)
+		return mustParseDuration(defaultVal)
+	}
+	return d
+}
+
+func mustParseDuration(s string) time.Duration {
+	d, _ := time.ParseDuration(s)
+	return d
 }
 
 // reqWithRetry performs HTTP request with exponential backoff (3 attempts).
@@ -116,14 +132,22 @@ func main() {
 		log.Fatalf("[配置错误] %v", err)
 	}
 	client := NewClient(cfg["endpoint"], cfg["api_key"])
-	log.Printf("[%s] 启动中 版本=%s 上游=%s", RepoName, Version, cfg["endpoint"])
+	readTimeout := parseDurationEnv("TARS_READ_TIMEOUT", "30s")
+	writeTimeout := parseDurationEnv("TARS_WRITE_TIMEOUT", "30s")
+	log.Printf("[%s] 启动中 版本=%s 上游=%s read_timeout=%s write_timeout=%s",
+		RepoName, Version, cfg["endpoint"], readTimeout, writeTimeout)
 	mode := os.Getenv("TARS_MCP_MODE")
 	if mode == "" { mode = "stdio" }
-	srv := &http.Server{Addr: ":8080", ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second}
+	srv := &http.Server{
+		Addr:         ":8080",
+		ReadTimeout:  readTimeout,
+		WriteTimeout: writeTimeout,
+	}
 	http.HandleFunc("/health", loggingMiddleware(func(w http.ResponseWriter, r *http.Request) { withClient(client, healthHandler)(w, r) }))
 	http.HandleFunc("/tools", loggingMiddleware(func(w http.ResponseWriter, r *http.Request) { withClient(client, toolsHandler)(w, r) }))
 	http.HandleFunc("/invoke", loggingMiddleware(func(w http.ResponseWriter, r *http.Request) { withClient(client, invokeHandler)(w, r) }))
 	http.HandleFunc("/metrics", loggingMiddleware(metricsHandler))
+	http.HandleFunc("/version", loggingMiddleware(versionHandler))
 	go func() {
 		sigCh := make(chan os.Signal, 1)
 		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
@@ -203,6 +227,14 @@ func metricsHandler(w http.ResponseWriter, r *http.Request) {
 		"errors_total":   atomic.LoadInt64(&errorCount),
 		"uptime":         time.Since(startTime).Round(time.Second).String(),
 		"version":        Version,
+	})
+}
+
+func versionHandler(w http.ResponseWriter, r *http.Request) {
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"name":    RepoName,
+		"version": Version,
+		"go":      "1.22",
 	})
 }
 

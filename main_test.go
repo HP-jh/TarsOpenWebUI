@@ -13,7 +13,7 @@ import (
 )
 
 func TestVersion(t *testing.T) {
-	if Version != "1.1.1" {
+	if Version != "1.1.2" {
 		t.Fatalf("expected version 1.1.0, got %s", Version)
 	}
 }
@@ -239,5 +239,40 @@ func TestMetricsHandler_CountsRequests(t *testing.T) {
 	after := atomic.LoadInt64(&requestCount)
 	if after <= before {
 		t.Fatalf("expected requestCount to increase, before=%d after=%d", before, after)
+	}
+}
+
+func TestVersionHandler(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/version", nil)
+	w := httptest.NewRecorder()
+	loggingMiddleware(versionHandler)(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var resp map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp["version"] != "1.1.2" {
+		t.Fatalf("expected version 1.1.2, got %v", resp["version"])
+	}
+	if resp["name"] != RepoName {
+		t.Fatalf("expected name %s, got %v", RepoName, resp["name"])
+	}
+}
+
+func TestParseDurationEnv_Default(t *testing.T) {
+	t.Setenv("TEST_DUR_XYZ", "")
+	d := parseDurationEnv("TEST_DUR_XYZ", "10s")
+	if d != 10*time.Second {
+		t.Fatalf("expected 10s, got %v", d)
+	}
+}
+
+func TestParseDurationEnv_Custom(t *testing.T) {
+	t.Setenv("TEST_DUR_ABC", "5m")
+	d := parseDurationEnv("TEST_DUR_ABC", "30s")
+	if d != 5*time.Minute {
+		t.Fatalf("expected 5m, got %v", d)
 	}
 }
